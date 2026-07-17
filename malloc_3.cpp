@@ -8,6 +8,7 @@ using namespace std;
 #define MAX_ORDER 10
 
 struct MallocMetadata {
+    size_t size;
     unsigned char order;
     MallocMetadata* next;
     MallocMetadata* prev;
@@ -17,6 +18,8 @@ struct MallocMetadata {
 static MallocMetadata* Mem_array[MAX_ORDER + 1];
 
 bool mem_exists = false;
+
+void* orig_addr;
 
 void mem_init() {
     for (auto& ptr : Mem_array) {
@@ -36,9 +39,27 @@ void mem_init() {
         }
         else addr->prev = nullptr;
         if (i == 31) addr->next = nullptr;
+        addr->size = 0x20000;
     }
     Mem_array[MAX_ORDER] = (MallocMetadata*) startptr;
+    orig_addr = startptr;
     mem_exists = true;
+}
+
+void* splitblock (MallocMetadata* meta_ptr, unsigned char order) {
+    while (meta_ptr->order > order) {
+        Mem_array[meta_ptr->order] = meta_ptr->next;
+        char* clean_newaddr = ((char*)meta_ptr) + meta_ptr->size/2;
+        MallocMetadata* newaddr = (MallocMetadata*) clean_newaddr;
+        meta_ptr->size /= 2;
+        newaddr->size = meta_ptr->size;
+        meta_ptr->order--;
+        newaddr->order = meta_ptr->order;
+        newaddr->prev = meta_ptr;
+        if (meta_ptr->next) meta_ptr->next->prev = meta_ptr->prev;
+        if (meta_ptr->prev) meta_ptr->prev->next = meta_ptr->next;
+        
+    }
 }
 
 void* smalloc(size_t size) {
@@ -46,4 +67,25 @@ void* smalloc(size_t size) {
         mem_init();
     }
 
+    if (!mem_exists) {
+        return (void*)(-1);
+    }
+
+    unsigned char order = -1;
+    for (int i = 128, counter = 0; i <= 0x20000; i*=2, counter++) {
+        if (i >= size) {
+            order = (unsigned char)counter;
+            break;
+        }
+    }
+
+    if (order >= 0 && order <= MAX_ORDER) { // normal size file
+        for (int i = order; i <= MAX_ORDER; i++) {
+            if (Mem_array[i] != nullptr) {
+
+            }
+        }
+    } else { // Large file!!!
+
+    }
 }
