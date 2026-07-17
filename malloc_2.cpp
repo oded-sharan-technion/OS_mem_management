@@ -1,6 +1,6 @@
 #include <stdlib.h>
 #include <unistd.h>
-#include <string.h>
+#include <cstring>
 
 using namespace std;
 
@@ -11,7 +11,7 @@ struct MallocMetadata {
     bool is_free;
 };
 
-MallocMetadata* Mem_list = nullptr;
+static MallocMetadata* Mem_list = nullptr;
 
 void* smalloc(size_t size) {
     if (size == 0) {
