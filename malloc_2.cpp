@@ -35,17 +35,17 @@ void* smalloc(size_t size) {
         data.is_free = false;
         *current = data;
 
-        return current + sizeof(MallocMetadata);
+        return (void*)(((char*)current) + sizeof(MallocMetadata));
     } else {
         if (current->size >= size && current->is_free) {
             current->is_free = false;
-            return current + sizeof(MallocMetadata);
+            return (void*)(((char*)current) + sizeof(MallocMetadata));
         }
         do {
             current = current->next;
             if (current->size >= size && current->is_free) {
                 current->is_free = false;
-                return current + sizeof(MallocMetadata);
+                return (void*)(((char*)current) + sizeof(MallocMetadata));
             }
         } while(current->next != nullptr);
         void* ptr = sbrk(real_size);
@@ -90,7 +90,7 @@ void* smalloc(size_t size) {
         //     *metadata = data;
         //     sorter->prev = metadata;
         // }
-        return metadata + sizeof(MallocMetadata);
+        return (void*)(((char*)metadata) + sizeof(MallocMetadata));
     }
 }
 
@@ -118,6 +118,7 @@ void* srealloc(void* oldp, size_t size) {
     void* ptr = smalloc(size);
     memmove(ptr, oldp, metadata->size);
     sfree(oldp);
+    return ptr;
 }
 
 // metadata funcs
