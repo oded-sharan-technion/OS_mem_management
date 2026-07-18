@@ -23,100 +23,68 @@ void* smalloc(size_t size) {
     MallocMetadata* current = Mem_list;
     MallocMetadata data;
     int real_size = size + sizeof(MallocMetadata);
-    if (current == nullptr) {
+    if (!current) {
         void* ptr = sbrk(real_size);
         if (ptr == (void*)(-1)) {
             return NULL;
         }
-        current = (MallocMetadata*)(ptr + 1);
-        data.size = size;
+        current = (MallocMetadata*)(ptr);
+        data.size = size + sizeof(MallocMetadata);
         data.next = nullptr;
         data.prev = nullptr;
         data.is_free = false;
         *current = data;
 
+        Mem_list = current;
         return (void*)(((char*)current) + sizeof(MallocMetadata));
     } else {
-        if (current->size >= size && current->is_free) {
+        if (current->size >= size + sizeof(MallocMetadata) && current->is_free) {
             current->is_free = false;
             return (void*)(((char*)current) + sizeof(MallocMetadata));
         }
-        do {
+        while(current->next) {
             current = current->next;
-            if (current->size >= size && current->is_free) {
+            if (current->size >= size + sizeof(MallocMetadata) && current->is_free) {
                 current->is_free = false;
                 return (void*)(((char*)current) + sizeof(MallocMetadata));
             }
-        } while(current->next != nullptr);
+        }
         void* ptr = sbrk(real_size);
         if (ptr == (void*)(-1)) {
             return NULL;
         }
-        MallocMetadata* metadata = (MallocMetadata*)(ptr + 1);
-        data.size = size;
+        MallocMetadata* metadata = (MallocMetadata*)ptr;
+        data.size = size + sizeof(MallocMetadata);
         data.next = nullptr;
         data.prev = current;
         data.is_free = false;
         *metadata = data;
         current->next = metadata;
-        // if we want to sort by size as well
-        //
-        // MallocMetadata* sorter = Mem_list;
-        // while(sorter->next != nullptr) {
-        //     if (sorter->size > size) {    
-        //         data.next = sorter;
-        //         if (sorter->prev != nullptr) {
-        //             data.prev = sorter->prev;
-        //         } else {
-        //             data.prev = nullptr;
-        //         }
-        //         *metadata = data;
-        //         sorter->prev = metadata;
-        //         break;
-        //     }
-        // }
-        // if (sorter->size <= size) {
-        //     data.next = nullptr;
-        //     data.prev = sorter;
-        //     *metadata = data;
-        //     sorter->next = metadata;
-        // } else {
-        //     data.next = sorter;
-        //     if (sorter->prev != nullptr) {
-        //         data.prev = sorter->prev;
-        //     } else {
-        //         data.prev = nullptr;
-        //     }
-        //     *metadata = data;
-        //     sorter->prev = metadata;
-        // }
+
         return (void*)(((char*)metadata) + sizeof(MallocMetadata));
     }
 }
 
 void* scalloc(size_t size) {
     void* ptr = smalloc(size);
-    if (ptr == NULL) return NULL;
+    if (!ptr) return NULL;
     memset(ptr, 0, size);
     return ptr;
 }
 
 void sfree (void* p) {
-    if (p == nullptr) return;
-    p -= sizeof(MallocMetadata);
-    MallocMetadata* metadata = (MallocMetadata*)p;
+    if (!p) return;
+    MallocMetadata* metadata = (MallocMetadata*)(((char*)p) - sizeof(MallocMetadata));
     if (metadata->is_free) return;
     metadata->is_free = true;
 }
 
 void* srealloc(void* oldp, size_t size) {
-    if (oldp == nullptr) {
-        return smalloc(size);
-    }
-    MallocMetadata* metadata = (MallocMetadata*)(oldp - sizeof(MallocMetadata));
-    if (metadata->size <= size) return oldp;
+    if (!oldp) return smalloc(size);
+    MallocMetadata* metadata = (MallocMetadata*)(((char*)oldp) - sizeof(MallocMetadata));
+    if (metadata->size - sizeof(MallocMetadata) >= size) return oldp;
     void* ptr = smalloc(size);
-    memmove(ptr, oldp, metadata->size);
+    memmove(ptr, oldp, metadata->size - sizeof(MallocMetadata));
     sfree(oldp);
     return ptr;
 }
@@ -125,60 +93,66 @@ void* srealloc(void* oldp, size_t size) {
 
 size_t _num_free_blocks() {
     MallocMetadata* current = Mem_list;
-    if (current = nullptr) return 0;
-    size_t num = 1;
-    do {
+    if (!current) return 0;
+    size_t num = 0;
+    if (current->is_free) {
+        num++;
+    }
+    while (current->next ) {
         current = current->next;
         if (current->is_free) {
             num++;
         }
-    } while (current->next != nullptr);
+    }
     return num;
 }
 
 size_t _num_free_bytes() {
     MallocMetadata* current = Mem_list;
-    if (current = nullptr) return 0;
-    size_t num = current->size;
-    do {
+    if (!current) return 0;
+    size_t num = 0;
+    if (current->is_free) {
+        num += current->size - sizeof(MallocMetadata);
+    }
+    while (current->next ) {
         current = current->next;
         if (current->is_free) {
-            num += current->size;
+            num += current->size - sizeof(MallocMetadata);
         }
-    } while (current->next != nullptr);
+    }
     return num;
 }
 
 size_t _num_allocated_blocks() {
     MallocMetadata* current = Mem_list;
-    if (current = nullptr) return 0;
+    if (!current) return 0;
     size_t num = 1;
-    do {
+    while (current->next) {
         current = current->next;
         num++;
-    } while (current->next != nullptr);
+    }
     return num;
 }
 
 size_t _num_allocated_bytes() {
     MallocMetadata* current = Mem_list;
-    if (current = nullptr) return 0;
-    size_t num = current->size;
-    do {
+    if (!current) return 0;
+    size_t num = current->size - sizeof(MallocMetadata);
+    while (current->next) {
         current = current->next;
-        num += current->size;
-    } while (current->next != nullptr);
+        num += current->size - sizeof(MallocMetadata);
+    }
     return num;
 }
 
 size_t _num_meta_data_bytes() {
     MallocMetadata* current = Mem_list;
-    if (current = nullptr) return 0;
+    if (!current) return 0;
     size_t sum = sizeof(MallocMetadata);
-    do {
+    while (current->next) {
         current = current->next;
         sum+= sizeof(MallocMetadata);
-    } while (current->next != nullptr);
+    }
     return sum;
 }
 

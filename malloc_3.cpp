@@ -9,7 +9,7 @@ using namespace std;
 
 struct MallocMetadata {
     size_t size;
-    unsigned char order;
+    char order;
     MallocMetadata* next;
     MallocMetadata* prev;
     bool is_free;
@@ -47,7 +47,7 @@ void mem_init() {
     mem_exists = true;
 }
 
-void* splitblock (MallocMetadata* meta_ptr, unsigned char order) {
+void* splitblock (MallocMetadata* meta_ptr, char order) {
     Mem_array[meta_ptr->order] = meta_ptr->next;
     if (meta_ptr->next) {
         meta_ptr->next->prev = nullptr;
@@ -70,7 +70,35 @@ void* splitblock (MallocMetadata* meta_ptr, unsigned char order) {
     return (void*)meta_ptr;
 }
 
+void* joinblock(MallocMetadata* meta_ptr, char max_ord = MAX_ORDER) {
+    while(meta_ptr->order < max_ord) {int offset = (char*)meta_ptr - (char*)orig_addr;
+        MallocMetadata* complement = (MallocMetadata*)(((char*)orig_addr) + (meta_ptr->size ^ offset));
+        
+        if (complement->is_free && complement->order == meta_ptr->order) {
+            if (complement->next) complement->next->prev = complement->prev;
+            if (complement->prev) complement->prev->next = complement->next;
+            if (Mem_array[meta_ptr->order] == complement) Mem_array[meta_ptr->order] = complement->next;
+            complement->next = nullptr;
+            complement->prev = nullptr;
+            // merge
+            if (complement >= meta_ptr) meta_ptr = meta_ptr;
+            else meta_ptr = complement;
+            meta_ptr->size *= 2;
+            meta_ptr->order++;
+        } else {
+            return (void*)meta_ptr;
+        }
+    }
+    return (void*)meta_ptr;
+}
+
 void* smalloc(size_t size) {
+    if (size == 0) {
+        return NULL;
+    }
+    if (size > 100000000) {
+        return NULL;
+    }
     if (!mem_exists) {
         mem_init();
     }
@@ -79,17 +107,17 @@ void* smalloc(size_t size) {
         return NULL;
     }
 
-    unsigned char order = -1;
+    char order = -1;
     for (int i = 128, counter = 0; i <= 0x20000; i*=2, counter++) {
         if (i >= size + sizeof(MallocMetadata)) {
-            order = (unsigned char)counter;
+            order = (char)counter;
             break;
         }
     }
 
     if (order >= 0 && order <= MAX_ORDER) { // normal size file
         for (int i = order; i <= MAX_ORDER; i++) {
-            if (Mem_array[i] != nullptr) {
+            if (Mem_array[i]) {
                 MallocMetadata* resptr = (MallocMetadata*)splitblock(Mem_array[i], order);
                 if ((void*)resptr == (void*)(-1)) {
                     return NULL;
@@ -109,4 +137,90 @@ void* smalloc(size_t size) {
 
         return (void*)(((char*)resptr) + sizeof(MallocMetadata));
     }
+}
+
+void* scalloc(size_t size) {
+    void* ptr = smalloc(size);
+    if (!ptr) return NULL;
+    memset(ptr, 0, size);
+    return ptr;
+}
+
+void sfree (void* p) {
+    if (!p) return;
+    MallocMetadata* act_p = (MallocMetadata*)(((char*)p) - sizeof(MallocMetadata));
+
+    if (act_p->is_free) return;
+
+    if (act_p->order == (char)-1) {
+        munmap(act_p, act_p->size);
+        return;
+    } else {
+        act_p = (MallocMetadata*)joinblock(act_p);
+        act_p->next = Mem_array[act_p->order];
+        act_p->prev = nullptr;
+        if (Mem_array[act_p->order]) {
+            Mem_array[act_p->order]->prev = act_p;
+        }
+        Mem_array[act_p->order] = act_p;
+        act_p->is_free = true;
+        return;
+    }
+}
+
+void* srealloc(void* oldp, size_t size) {
+    if (!oldp) return smalloc(size);
+
+    MallocMetadata* metadata = (MallocMetadata*)(((char*)oldp) - sizeof(MallocMetadata));
+    int blk_size = metadata->size;
+    if (blk_size - sizeof(MallocMetadata) >= size) return oldp;
+    
+    // if not enough room, try merging
+    char order = (char)-1;
+    for (int i = 128, counter = 0; i <= 0x20000; i*=2, counter++) {
+        if (i >= size + sizeof(MallocMetadata)) {
+            order = (char)counter;
+            break;
+        }
+    }
+
+    if (metadata->order == (char)-1 || order == (char)-1) {
+        void* ptr = smalloc(size);
+        if (!ptr) return NULL;
+
+        memmove(ptr, oldp, blk_size - sizeof(MallocMetadata));
+        sfree(oldp);
+        return ptr;
+    }
+
+    //search for a merge path
+    char ord = metadata->order;
+    char* addr = (char*)metadata;
+    int t_size = metadata->size;
+    while (ord < order) {
+        int offset = addr - (char*)orig_addr;
+        MallocMetadata* complement =(MallocMetadata*)(((char*)orig_addr) + (t_size ^ offset));
+        if (complement->is_free && complement->order == ord) {
+            if ((char*)complement >= addr) addr = addr;
+            else addr = (char*)complement;
+            t_size *= 2;
+            ord++;
+        } else {
+            break;
+        }
+    }
+    if (ord == order) { // found!
+        MallocMetadata* test_ptr = (MallocMetadata*)joinblock(metadata, order);
+        memmove(((char*)test_ptr) + sizeof(MallocMetadata), oldp, blk_size - sizeof(MallocMetadata));
+        test_ptr->is_free = false;
+        return (void*)(((char*)test_ptr) + sizeof(MallocMetadata));
+    }
+    
+    // if all else fails, realloc
+    void* ptr = smalloc(size);
+    if (!ptr) return NULL;
+
+    memmove(ptr, oldp, blk_size - sizeof(MallocMetadata));
+    sfree(oldp);
+    return ptr;
 }

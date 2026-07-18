@@ -12,5 +12,5 @@ void* smalloc(size_t size) {
     if (ptr == (void*)(-1)) {
         return NULL;
     }
-    return ptr + 1;
+    return ptr;
 }
