@@ -65,10 +65,10 @@ void* smalloc(size_t size) {
     }
 }
 
-void* scalloc(size_t size) {
-    void* ptr = smalloc(size);
+void* scalloc(size_t num, size_t size) {
+    void* ptr = smalloc(size * num);
     if (!ptr) return NULL;
-    memset(ptr, 0, size);
+    memset(ptr, 0, size * num);
     return ptr;
 }
 
