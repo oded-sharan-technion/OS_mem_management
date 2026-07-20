@@ -20,13 +20,13 @@ struct MallocMetadata {
 static MallocMetadata* Mem_array[MAX_ORDER + 1];
 
 bool mem_exists = false;
-bool calloc_hugefile = false;
+char hugefile = 0;
 
 void* orig_addr;
-int num_free;
-int bytes_free;
-int num_taken;
-int bytes_taken;
+size_t num_free;
+size_t bytes_free;
+size_t num_taken;
+size_t bytes_taken;
 
 void mem_init() {
     for (auto& ptr : Mem_array) {
@@ -147,14 +147,18 @@ void* smalloc(size_t size) {
         return NULL;
     } else { // Large file!!!
         MallocMetadata* resptr;
-        if (size >= 0x400000 || calloc_hugefile) { // hugefile!!!!
+        bool huge = ((hugefile != 2) && size >= 0x400000) || (hugefile == 1);
+        if (huge) { // hugefile!!!!
             size_t newsize = 0x200000 * (((size + sizeof(MallocMetadata))/0x200000) + ((size + sizeof(MallocMetadata)) % 0x200000 != 0));
             resptr = (MallocMetadata*)mmap(NULL, newsize, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE | MAP_HUGETLB | MAP_HUGE_2MB, -1, 0);
+            hugefile = 0;
+            huge = false;
             if (resptr == MAP_FAILED) return NULL;
             resptr->size = newsize;
         }
         else {
             resptr = (MallocMetadata*)mmap(NULL, size + sizeof(MallocMetadata), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+            hugefile = 0;
             if (resptr == MAP_FAILED) return NULL;
             resptr->size = size + sizeof(MallocMetadata);
         }
@@ -172,11 +176,13 @@ void* smalloc(size_t size) {
 }
 
 void* scalloc(size_t num, size_t size) {
-    if (size >= 0x200000) {
-        calloc_hugefile = true;
+    if (size > 0x200000) {
+        hugefile = 1;
+    } else {
+        hugefile = 2;
     }
     void* ptr = smalloc(size * num);
-    calloc_hugefile = false;
+    hugefile = 0;
     if (!ptr) return NULL;
     memset(ptr, 0, size * num);
     return ptr;
